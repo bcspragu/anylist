@@ -1,0 +1,19 @@
+// WARNING: This file is auto-generated from cmd/pbgen, DO NOT MANUALLY EDIT!
+syntax = "proto3";
+
+option go_package = "github.com/bcspragu/anylist/pb";
+
+{{range .Messages}}
+message {{.Name}} {
+{{- range .Fields}}
+  {{ maybeRule . }}{{.Type}} {{.Name}} = {{.ID}};
+{{- end}}
+  {{- range .Enums}}
+  enum {{.Name}} {
+    {{- range .Values}}
+	  {{.Name}} = {{.ID}};
+	{{- end}}
+  }
+  {{- end}}
+}
+{{end}}
