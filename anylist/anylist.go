@@ -213,6 +213,125 @@ func (c *Client) Lists() (*pb.PBUserDataResponse, error) {
 	return m, nil
 }
 
+func (c *Client) AddItem(listID string, itemName string) error {
+	itemID := uuid.NewString()
+	req := &pb.PBListOperationList{
+		Operations: []*pb.PBListOperation{
+			{
+				Metadata: &pb.PBOperationMetadata{
+					OperationId: uuid.NewString(),
+					HandlerId:   "add-shopping-list-item",
+					UserId:      c.userID,
+				},
+				ListId:     listID,
+				ListItemId: itemID,
+				ListItem: &pb.ListItem{
+					Identifier:      itemID,
+					ListId:          listID,
+					Name:            itemName,
+					Checked:         false,
+					CategoryMatchId: "other",
+					UserId:          c.userID,
+				},
+			},
+		},
+	}
+
+	dat, err := proto.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request message: %w", err)
+	}
+	data := url.Values{}
+	data.Set("operations", string(dat))
+
+	resp, err := c.client.PostForm("https://www.anylist.com/data/shopping-lists/update", data)
+	if err != nil {
+		return fmt.Errorf("failed to add item: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("invalid response code %d, expected 200 OK", resp.StatusCode)
+	}
+
+	return nil
+}
+
+func (c *Client) RemoveItem(listID, itemID string) error {
+	req := &pb.PBListOperationList{
+		Operations: []*pb.PBListOperation{
+			{
+				Metadata: &pb.PBOperationMetadata{
+					OperationId: uuid.NewString(),
+					HandlerId:   "remove-shopping-list-item",
+					UserId:      c.userID,
+				},
+				ListId:     listID,
+				ListItemId: itemID,
+				ListItem: &pb.ListItem{
+					Identifier: itemID,
+					ListId:     listID,
+				},
+			},
+		},
+	}
+
+	dat, err := proto.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request message: %w", err)
+	}
+	data := url.Values{}
+	data.Set("operations", string(dat))
+
+	resp, err := c.client.PostForm("https://www.anylist.com/data/shopping-lists/update", data)
+	if err != nil {
+		return fmt.Errorf("failed to remove item: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("invalid response code %d, expected 200 OK", resp.StatusCode)
+	}
+
+	return nil
+}
+func (c *Client) SetChecked(listID, itemID string, checked bool) error {
+	updatedValue := "y"
+	if !checked {
+		updatedValue = "n"
+	}
+	req := &pb.PBListOperationList{
+		Operations: []*pb.PBListOperation{
+			{
+				Metadata: &pb.PBOperationMetadata{
+					OperationId: uuid.NewString(),
+					HandlerId:   "set-list-item-checked",
+					UserId:      c.userID,
+				},
+				ListId:       listID,
+				ListItemId:   itemID,
+				UpdatedValue: updatedValue,
+			},
+		},
+	}
+
+	dat, err := proto.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request message: %w", err)
+	}
+	data := url.Values{}
+	data.Set("operations", string(dat))
+
+	resp, err := c.client.PostForm("https://www.anylist.com/data/shopping-lists/update", data)
+	if err != nil {
+		return fmt.Errorf("failed to updated item checked: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("invalid response code %d, expected 200 OK", resp.StatusCode)
+	}
+
+	return nil
+}
+
 func toString(cs []*http.Cookie) string {
 	var out []string
 	for _, c := range cs {

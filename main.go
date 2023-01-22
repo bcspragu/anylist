@@ -42,18 +42,61 @@ func run() error {
 	// 	return fmt.Errorf("failed to listen for messages: %w", err)
 	// }
 
-	resp, err := c.Lists()
-	if err != nil {
-		return fmt.Errorf("failed to load lists: %w", err)
+	var list *List
+	refreshList := func() error {
+		resp, err := c.Lists()
+		if err != nil {
+			return fmt.Errorf("failed to load lists: %w", err)
+		}
+		tmp, err := toList(resp, "Grokeries 2.0")
+		if err != nil {
+			return fmt.Errorf("failed to convert list: %w", err)
+		}
+		list = tmp
+		return nil
 	}
-	list, err := toList(resp, "Grokeries 2.0")
-	if err != nil {
-		return fmt.Errorf("failed to convert list: %w", err)
+
+	if err := refreshList(); err != nil {
+		return fmt.Errorf("failed initial list load: %w", err)
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/list", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(list)
+	})
+	mux.HandleFunc("/api/add", func(w http.ResponseWriter, r *http.Request) {
+		itemName := r.PostFormValue("item_name")
+		if err := c.AddItem(list.ID, itemName); err != nil {
+			log.Printf("failed to add item %q: %v", itemName, err)
+			return
+		}
+		if err := refreshList(); err != nil {
+			log.Printf("failed to refresh list: %v", err)
+			return
+		}
+	})
+	mux.HandleFunc("/api/remove", func(w http.ResponseWriter, r *http.Request) {
+		itemID := r.PostFormValue("item_id")
+		if err := c.RemoveItem(list.ID, itemID); err != nil {
+			log.Printf("failed to remove item %q: %v", itemID, err)
+			return
+		}
+		if err := refreshList(); err != nil {
+			log.Printf("failed to refresh list: %v", err)
+			return
+		}
+	})
+	mux.HandleFunc("/api/check", func(w http.ResponseWriter, r *http.Request) {
+		itemID := r.PostFormValue("item_id")
+		checked := r.PostFormValue("checked") == "true"
+		if err := c.SetChecked(list.ID, itemID, checked); err != nil {
+			log.Printf("failed to update checked (%q, %t): %v", itemID, checked, err)
+			return
+		}
+		if err := refreshList(); err != nil {
+			log.Printf("failed to refresh list: %v", err)
+			return
+		}
 	})
 	if err := http.ListenAndServe(":8080", cors.Default().Handler(mux)); err != nil {
 		return fmt.Errorf("failed to run HTTP server: %w", err)
@@ -63,6 +106,7 @@ func run() error {
 }
 
 type List struct {
+	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Items []Item `json:"items"`
 }
@@ -92,6 +136,7 @@ func toList(in *pb.PBUserDataResponse, targetListName string) (*List, error) {
 	}
 
 	return &List{
+		ID:    list.Identifier,
 		Name:  list.Name,
 		Items: items,
 	}, nil
