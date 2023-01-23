@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/bcspragu/anylist/anylist"
 	"github.com/bcspragu/anylist/pb"
@@ -52,7 +54,10 @@ func run(args []string) error {
 		return fmt.Errorf("failed to decrypt secret config: %w", err)
 	}
 
-	c, err := anylist.New(secCfg.Email, secCfg.Password)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c, err := anylist.New(ctx, secCfg.Email, secCfg.Password)
 	// c, err := anylist.FromRefreshToken(secCfg.RefreshToken)
 	if err != nil {
 		return fmt.Errorf("failed to init anylist client: %w", err)
@@ -64,8 +69,8 @@ func run(args []string) error {
 	// }
 
 	var list *List
-	refreshList := func() error {
-		resp, err := c.Lists()
+	refreshList := func(ctx context.Context) error {
+		resp, err := c.Lists(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to load lists: %w", err)
 		}
@@ -77,9 +82,23 @@ func run(args []string) error {
 		return nil
 	}
 
-	if err := refreshList(); err != nil {
+	if err := refreshList(ctx); err != nil {
 		return fmt.Errorf("failed initial list load: %w", err)
 	}
+
+	// This is just a hack to keep the server up to date with other people's
+	// changes. We should remove this if we ever get websockets working.
+	go func() {
+		t := time.NewTicker(10 * time.Minute)
+		for {
+			select {
+			case <-t.C:
+				refreshList(ctx)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/list", func(w http.ResponseWriter, r *http.Request) {
@@ -87,22 +106,22 @@ func run(args []string) error {
 	})
 	mux.HandleFunc("/api/add", func(w http.ResponseWriter, r *http.Request) {
 		itemName := r.PostFormValue("item_name")
-		if err := c.AddItem(list.ID, itemName); err != nil {
+		if err := c.AddItem(r.Context(), list.ID, itemName); err != nil {
 			log.Printf("failed to add item %q: %v", itemName, err)
 			return
 		}
-		if err := refreshList(); err != nil {
+		if err := refreshList(r.Context()); err != nil {
 			log.Printf("failed to refresh list: %v", err)
 			return
 		}
 	})
 	mux.HandleFunc("/api/remove", func(w http.ResponseWriter, r *http.Request) {
 		itemID := r.PostFormValue("item_id")
-		if err := c.RemoveItem(list.ID, itemID); err != nil {
+		if err := c.RemoveItem(r.Context(), list.ID, itemID); err != nil {
 			log.Printf("failed to remove item %q: %v", itemID, err)
 			return
 		}
-		if err := refreshList(); err != nil {
+		if err := refreshList(r.Context()); err != nil {
 			log.Printf("failed to refresh list: %v", err)
 			return
 		}
@@ -110,11 +129,11 @@ func run(args []string) error {
 	mux.HandleFunc("/api/check", func(w http.ResponseWriter, r *http.Request) {
 		itemID := r.PostFormValue("item_id")
 		checked := r.PostFormValue("checked") == "true"
-		if err := c.SetChecked(list.ID, itemID, checked); err != nil {
+		if err := c.SetChecked(r.Context(), list.ID, itemID, checked); err != nil {
 			log.Printf("failed to update checked (%q, %t): %v", itemID, checked, err)
 			return
 		}
-		if err := refreshList(); err != nil {
+		if err := refreshList(r.Context()); err != nil {
 			log.Printf("failed to refresh list: %v", err)
 			return
 		}

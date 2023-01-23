@@ -2,6 +2,7 @@ package anylist
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/bcspragu/anylist/pb"
 	"github.com/google/uuid"
+	"golang.org/x/net/context/ctxhttp"
 	"golang.org/x/net/publicsuffix"
 	"golang.org/x/net/websocket"
 	"google.golang.org/protobuf/proto"
@@ -37,7 +39,7 @@ type Client struct {
 	userID       string
 }
 
-func FromRefreshToken(rTkn string) (*Client, error) {
+func FromRefreshToken(ctx context.Context, rTkn string) (*Client, error) {
 	jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
 	if err != nil {
 		return nil, fmt.Errorf("failed to init cookie jar: %w", err)
@@ -53,14 +55,14 @@ func FromRefreshToken(rTkn string) (*Client, error) {
 		},
 	}
 
-	if err := c.refresh(); err != nil {
+	if err := c.refresh(ctx); err != nil {
 		return nil, fmt.Errorf("failed to refresh: %w", err)
 	}
 
 	return c, nil
 }
 
-func New(email, password string) (*Client, error) {
+func New(ctx context.Context, email, password string) (*Client, error) {
 	jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
 	if err != nil {
 		return nil, fmt.Errorf("failed to init cookie jar: %w", err)
@@ -78,7 +80,7 @@ func New(email, password string) (*Client, error) {
 		},
 	}
 
-	if err := c.login(); err != nil {
+	if err := c.login(ctx); err != nil {
 		return nil, fmt.Errorf("failed to log in: %w", err)
 	}
 	rt.signedUserID = c.signedUserID
@@ -91,11 +93,11 @@ type refreshResponse struct {
 	AccessToken  string `json:"access_token"`
 }
 
-func (c *Client) refresh() error {
+func (c *Client) refresh(ctx context.Context) error {
 	data := url.Values{}
 	data.Set("refresh_token", c.refreshToken)
 
-	resp, err := c.client.PostForm("https://www.anylist.com/auth/token/refresh", data)
+	resp, err := ctxhttp.PostForm(ctx, c.client, "https://www.anylist.com/auth/token/refresh", data)
 	if err != nil {
 		return fmt.Errorf("failed to get response: %w", err)
 	}
@@ -115,12 +117,12 @@ type loginResponse struct {
 	UserID       string `json:"user_id"`
 }
 
-func (c *Client) login() error {
+func (c *Client) login(ctx context.Context) error {
 	data := url.Values{}
 	data.Set("email", c.email)
 	data.Set("password", c.password)
 
-	resp, err := c.client.PostForm("https://www.anylist.com/data/validate-login", data)
+	resp, err := ctxhttp.PostForm(ctx, c.client, "https://www.anylist.com/data/validate-login", data)
 	if err != nil {
 		return fmt.Errorf("failed to get response: %w", err)
 	}
@@ -194,8 +196,8 @@ func (c *Client) Listen(cb func(string)) error {
 
 }
 
-func (c *Client) Lists() (*pb.PBUserDataResponse, error) {
-	resp, err := c.client.Post("https://www.anylist.com/data/user-data/get", "application/x-www-form-urlencoded", nil)
+func (c *Client) Lists(ctx context.Context) (*pb.PBUserDataResponse, error) {
+	resp, err := ctxhttp.Post(ctx, c.client, "https://www.anylist.com/data/user-data/get", "application/x-www-form-urlencoded", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load data: %w", err)
 	}
@@ -213,7 +215,7 @@ func (c *Client) Lists() (*pb.PBUserDataResponse, error) {
 	return m, nil
 }
 
-func (c *Client) AddItem(listID string, itemName string) error {
+func (c *Client) AddItem(ctx context.Context, listID string, itemName string) error {
 	itemID := uuid.NewString()
 	req := &pb.PBListOperationList{
 		Operations: []*pb.PBListOperation{
@@ -244,7 +246,7 @@ func (c *Client) AddItem(listID string, itemName string) error {
 	data := url.Values{}
 	data.Set("operations", string(dat))
 
-	resp, err := c.client.PostForm("https://www.anylist.com/data/shopping-lists/update", data)
+	resp, err := ctxhttp.PostForm(ctx, c.client, "https://www.anylist.com/data/shopping-lists/update", data)
 	if err != nil {
 		return fmt.Errorf("failed to add item: %w", err)
 	}
@@ -256,7 +258,7 @@ func (c *Client) AddItem(listID string, itemName string) error {
 	return nil
 }
 
-func (c *Client) RemoveItem(listID, itemID string) error {
+func (c *Client) RemoveItem(ctx context.Context, listID, itemID string) error {
 	req := &pb.PBListOperationList{
 		Operations: []*pb.PBListOperation{
 			{
@@ -282,7 +284,7 @@ func (c *Client) RemoveItem(listID, itemID string) error {
 	data := url.Values{}
 	data.Set("operations", string(dat))
 
-	resp, err := c.client.PostForm("https://www.anylist.com/data/shopping-lists/update", data)
+	resp, err := ctxhttp.PostForm(ctx, c.client, "https://www.anylist.com/data/shopping-lists/update", data)
 	if err != nil {
 		return fmt.Errorf("failed to remove item: %w", err)
 	}
@@ -293,7 +295,8 @@ func (c *Client) RemoveItem(listID, itemID string) error {
 
 	return nil
 }
-func (c *Client) SetChecked(listID, itemID string, checked bool) error {
+
+func (c *Client) SetChecked(ctx context.Context, listID, itemID string, checked bool) error {
 	updatedValue := "y"
 	if !checked {
 		updatedValue = "n"
@@ -320,7 +323,7 @@ func (c *Client) SetChecked(listID, itemID string, checked bool) error {
 	data := url.Values{}
 	data.Set("operations", string(dat))
 
-	resp, err := c.client.PostForm("https://www.anylist.com/data/shopping-lists/update", data)
+	resp, err := ctxhttp.PostForm(ctx, c.client, "https://www.anylist.com/data/shopping-lists/update", data)
 	if err != nil {
 		return fmt.Errorf("failed to updated item checked: %w", err)
 	}
