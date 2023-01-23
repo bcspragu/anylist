@@ -11,6 +11,49 @@ It looks like this:
 
 ![Screenshot of a basic grocery list](/assets/screenshot.png)
 
+## Running Locally
+
+### Initial Setup
+
+Unmodified, the backend takes in your user credentials via a
+[sops](https://github.com/mozilla/sops)-encrypted file. For your own use, you
+can either rip out this mechanism and use your own (hardcoded or env vars or
+flags, etc), or generate your own sops-encrypted file. Here's a quick example
+of how to do that using [age](https://github.com/FiloSottile/age) for key
+material generation.
+
+```bash
+# Generate a new key for sops to use.
+age-keygen -o $XDG_CONFIG_HOME/sops/age/keys.txt
+# This will output something like:
+# Public key: <public key, starts with 'age'>
+
+# Write the plaintext JSON file with your credentials. You can also create the
+# file with sops directly if you don't want the plaintext to touch your disk.
+cat >secrets.json <<EOL
+{
+  "email": "...",
+  "password": "..."
+}
+EOL
+
+# Encrypt the file with your age public key.
+sops encrypt --age <public key> secrets.json > secrets.enc.json
+```
+
+### Commands
+
+```bash
+# Run the backend
+go run .
+
+# In a different window, run the frontend
+cd frontend
+pnpm dev
+```
+
+The site is accessible on `localhost:5173`.
+
 ## The Extremely Mundane Story
 
 I received an AnyList subscription as a Christmas gift, but I'm not a big fan

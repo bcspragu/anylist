@@ -4,6 +4,7 @@ go 1.19
 
 require (
 	github.com/google/uuid v1.3.0
+	github.com/namsral/flag v1.7.4-pre
 	github.com/rs/cors v1.8.3
 	go.mozilla.org/sops/v3 v3.7.3
 	golang.org/x/net v0.0.0-20220420153159-1850ba15e1be

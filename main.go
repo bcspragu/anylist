@@ -2,13 +2,17 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 
 	"github.com/bcspragu/anylist/anylist"
 	"github.com/bcspragu/anylist/pb"
+	"github.com/namsral/flag"
 	"github.com/rs/cors"
 	"go.mozilla.org/sops/v3/decrypt"
 )
@@ -20,13 +24,30 @@ type SecretConfig struct {
 }
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run() error {
-	secCfg, err := decryptConfig("secrets.enc.json")
+func run(args []string) error {
+	if len(args) == 0 {
+		return errors.New("args cannot be empty")
+	}
+
+	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	var (
+		sopsConfigPath  = fs.String("sops_encrypted_config", "secrets.enc.json", "A JSON-formatted configuration file for our main server, parseable by the SOPS tool (https://github.com/mozilla/sops).")
+		port            = fs.Int("port", 8080, "The port to serve the  HTTP API service on.")
+		groceryListName = fs.String("grocery_list_name", "Grokeries 2.0", "The name of the AnyList list to target.")
+	)
+	// Allows for passing in configuration via a -config path/to/env-file.conf
+	// flag, see https://pkg.go.dev/github.com/namsral/flag#readme-usage
+	fs.String(flag.DefaultConfigFlagname, "", "path to config file")
+	if err := fs.Parse(args[1:]); err != nil {
+		return fmt.Errorf("failed to parse flags: %v", err)
+	}
+
+	secCfg, err := decryptConfig(*sopsConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to decrypt secret config: %w", err)
 	}
@@ -48,7 +69,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("failed to load lists: %w", err)
 		}
-		tmp, err := toList(resp, "Grokeries 2.0")
+		tmp, err := toList(resp, *groceryListName)
 		if err != nil {
 			return fmt.Errorf("failed to convert list: %w", err)
 		}
@@ -98,7 +119,7 @@ func run() error {
 			return
 		}
 	})
-	if err := http.ListenAndServe(":8080", cors.Default().Handler(mux)); err != nil {
+	if err := http.ListenAndServe(":"+strconv.Itoa(*port), cors.Default().Handler(mux)); err != nil {
 		return fmt.Errorf("failed to run HTTP server: %w", err)
 	}
 
